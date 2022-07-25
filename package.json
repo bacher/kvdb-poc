@@ -1,0 +1,24 @@
+{
+  "name": "lsm-poc",
+  "version": "0.1.0",
+  "description": "LSM Proof of Concept",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": {
+    "name": "Ilia <bacher> Lebedev",
+    "email": "bacherko@gmail.com",
+    "url": "https://github.com/bacher"
+  },
+  "license": "ISC",
+  "packageManager": "yarn@3.2.2",
+  "devDependencies": {
+    "@types/node": "^18.6.1",
+    "prettier": "^2.7.1",
+    "ts-node": "^10.9.1",
+    "typescript": "^4.7.4"
+  }
+}
