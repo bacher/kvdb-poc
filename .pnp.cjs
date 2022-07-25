@@ -36,6 +36,7 @@ function $$SETUP_STATE(hydrateRuntimeState, basePath) {
             ["@types/node", "npm:18.6.1"],\
             ["prettier", "npm:2.7.1"],\
             ["ts-node", "virtual:d940ce31686f89e230f2453506439780e72011ca438163d23e3a7ef8dac66c4bb64ceee2285a5418eb0a741624446eff6f0a3623df540a5a077bcc7e783c540c#npm:10.9.1"],\
+            ["tslib", "npm:2.4.0"],\
             ["typescript", "patch:typescript@npm%3A4.7.4#~builtin<compat/typescript>::version=4.7.4&hash=f456af"]\
           ],\
           "linkType": "SOFT"\
@@ -178,6 +179,7 @@ function $$SETUP_STATE(hydrateRuntimeState, basePath) {
             ["@types/node", "npm:18.6.1"],\
             ["prettier", "npm:2.7.1"],\
             ["ts-node", "virtual:d940ce31686f89e230f2453506439780e72011ca438163d23e3a7ef8dac66c4bb64ceee2285a5418eb0a741624446eff6f0a3623df540a5a077bcc7e783c540c#npm:10.9.1"],\
+            ["tslib", "npm:2.4.0"],\
             ["typescript", "patch:typescript@npm%3A4.7.4#~builtin<compat/typescript>::version=4.7.4&hash=f456af"]\
           ],\
           "linkType": "SOFT"\
@@ -242,6 +244,15 @@ function $$SETUP_STATE(hydrateRuntimeState, basePath) {
             "@types/swc__wasm",\
             "@types/typescript",\
             "typescript"\
+          ],\
+          "linkType": "HARD"\
+        }]\
+      ]],\
+      ["tslib", [\
+        ["npm:2.4.0", {\
+          "packageLocation": "./.yarn/cache/tslib-npm-2.4.0-9cb6dc5030-8c4aa6a3c5.zip/node_modules/tslib/",\
+          "packageDependencies": [\
+            ["tslib", "npm:2.4.0"]\
           ],\
           "linkType": "HARD"\
         }]\

@@ -1,5 +1,8 @@
+import { runLSM } from './lsm';
+import { runGenerator } from './generator';
 
-import {kek} from './some'
+const lsm = runLSM({
+  dataPath: './data'
+});
 
-kek()
-console.log('Hello')
+runGenerator(lsm);
