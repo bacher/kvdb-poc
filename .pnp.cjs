@@ -33,7 +33,9 @@ function $$SETUP_STATE(hydrateRuntimeState, basePath) {
         [null, {\
           "packageLocation": "./",\
           "packageDependencies": [\
+            ["@types/lodash", "npm:4.14.182"],\
             ["@types/node", "npm:18.6.1"],\
+            ["lodash", "npm:4.17.21"],\
             ["prettier", "npm:2.7.1"],\
             ["ts-node", "virtual:d940ce31686f89e230f2453506439780e72011ca438163d23e3a7ef8dac66c4bb64ceee2285a5418eb0a741624446eff6f0a3623df540a5a077bcc7e783c540c#npm:10.9.1"],\
             ["tslib", "npm:2.4.0"],\
@@ -117,6 +119,15 @@ function $$SETUP_STATE(hydrateRuntimeState, basePath) {
           "linkType": "HARD"\
         }]\
       ]],\
+      ["@types/lodash", [\
+        ["npm:4.14.182", {\
+          "packageLocation": "./.yarn/cache/@types-lodash-npm-4.14.182-1073aac722-7dd137aa9d.zip/node_modules/@types/lodash/",\
+          "packageDependencies": [\
+            ["@types/lodash", "npm:4.14.182"]\
+          ],\
+          "linkType": "HARD"\
+        }]\
+      ]],\
       ["@types/node", [\
         ["npm:18.6.1", {\
           "packageLocation": "./.yarn/cache/@types-node-npm-18.6.1-9231d14b7c-06331f68bc.zip/node_modules/@types/node/",\
@@ -171,12 +182,23 @@ function $$SETUP_STATE(hydrateRuntimeState, basePath) {
           "linkType": "HARD"\
         }]\
       ]],\
+      ["lodash", [\
+        ["npm:4.17.21", {\
+          "packageLocation": "./.yarn/cache/lodash-npm-4.17.21-6382451519-eb835a2e51.zip/node_modules/lodash/",\
+          "packageDependencies": [\
+            ["lodash", "npm:4.17.21"]\
+          ],\
+          "linkType": "HARD"\
+        }]\
+      ]],\
       ["lsm-poc", [\
         ["workspace:.", {\
           "packageLocation": "./",\
           "packageDependencies": [\
             ["lsm-poc", "workspace:."],\
+            ["@types/lodash", "npm:4.14.182"],\
             ["@types/node", "npm:18.6.1"],\
+            ["lodash", "npm:4.17.21"],\
             ["prettier", "npm:2.7.1"],\
             ["ts-node", "virtual:d940ce31686f89e230f2453506439780e72011ca438163d23e3a7ef8dac66c4bb64ceee2285a5418eb0a741624446eff6f0a3623df540a5a077bcc7e783c540c#npm:10.9.1"],\
             ["tslib", "npm:2.4.0"],\

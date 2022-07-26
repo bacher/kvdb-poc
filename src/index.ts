@@ -1,8 +1,5 @@
-import { runLSM } from './lsm';
-import { runGenerator } from './generator';
+import { run } from './main';
 
-const lsm = runLSM({
-  dataPath: './data'
+run().catch(error => {
+  console.error(error);
 });
-
-runGenerator(lsm);

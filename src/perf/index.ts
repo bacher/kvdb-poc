@@ -1,4 +1,4 @@
-import type { DatabaseInstance } from '../lsm/types';
+import type { DatabaseInstance } from '../engines/common/types';
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => {
@@ -13,10 +13,10 @@ export async function runThread(db: DatabaseInstance) {
     if (Math.random() < 0.5) {
       await db.set(key, Math.random().toString());
     } else {
-      db.get(key);
+      await db.get(key);
     }
 
-    sleep(100);
+    await sleep(10);
   }
 }
 
