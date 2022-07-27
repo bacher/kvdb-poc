@@ -1,10 +1,9 @@
-import type { DatabaseInstance } from '../engines/common/types';
+import fs from 'fs/promises';
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => {
-    setTimeout(resolve, ms);
-  });
-}
+import type { DatabaseInstance } from '../engines/common/types';
+import { sleep } from '../utils/time';
+
+const REPORT_EVERY_MS = 5000;
 
 let stats = {
   readTimes: [] as number[],
@@ -48,7 +47,7 @@ async function runThread(db: DatabaseInstance) {
 
       if (alreadyValues.has(key)) {
         if (alreadyValues.get(key) !== value) {
-          throw new Error(`Incorrect value at ${key}, "${alreadyValues.get(key)}" !== "${value}"`);
+          throw new Error(`Incorrect value at ${key}, (${alreadyValues.get(key)}) !== (${value})`);
         }
       } else {
         alreadyValues.set(key, value);
@@ -68,29 +67,42 @@ function runStatsReporter() {
       writeTimes: [],
     };
 
-    let sumReadTime = 0;
-    let sumWriteTime = 0;
+    let avgRead = '-';
+    let avgWrite = '-';
 
-    for (let i = 0; i < reportStats.readTimes.length; i++) {
-      sumReadTime += reportStats.readTimes[i];
+    if (reportStats.readTimes.length > 0) {
+      let sumReadTime = 0;
+
+      for (let i = 0; i < reportStats.readTimes.length; i++) {
+        sumReadTime += reportStats.readTimes[i];
+      }
+
+      avgRead = `${Math.round(sumReadTime * 1000 / reportStats.readTimes.length).toFixed(0)}mks`;
     }
 
-    for (let i = 0; i < reportStats.writeTimes.length; i++) {
-      sumWriteTime += reportStats.writeTimes[i];
+    if (reportStats.writeTimes.length > 0) {
+      let sumWriteTime = 0;
+
+      for (let i = 0; i < reportStats.writeTimes.length; i++) {
+        sumWriteTime += reportStats.writeTimes[i];
+      }
+
+      avgWrite = `${Math.round(sumWriteTime * 1000 / reportStats.readTimes.length).toFixed(0)}mks`;
     }
 
-    const avgRead = sumReadTime * 1000 / reportStats.readTimes.length;
-    const avgWrite = sumWriteTime * 1000 / reportStats.writeTimes.length;
+    const readFormatted = avgRead.padStart(8, ' ');
+    const writeFormatted = avgWrite.padStart(8, ' ');
 
-    const readFormatted = `${Math.round(avgRead)}mks`.padStart(8, ' ');
-    const writeFormatted = `${Math.round(avgWrite)}mks`.padStart(8, ' ');
+    const statsString = `Stats: avg read ${readFormatted}, avg write ${writeFormatted}.`;
 
-    console.log(`Stats: avg read ${readFormatted}, avg write ${writeFormatted}.`);
-  }, 1000);
+    //console.log(statsString);
+
+    fs.writeFile('stats/perf.txt', statsString);
+
+  }, REPORT_EVERY_MS);
 }
 
 export function runGenerator(db: DatabaseInstance): void {
-
   runStatsReporter();
 
   runThread(db).catch(error => {

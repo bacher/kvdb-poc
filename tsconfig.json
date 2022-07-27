@@ -12,8 +12,17 @@
     "experimentalDecorators": true,
     "forceConsistentCasingInFileNames": true,
     "importHelpers": true,
-    "importsNotUsedAsValues": "preserve", // this is important for proper files watching
-    "lib": ["ES2015", "ES2016", "ES2017", "ES2018", "ES2019.Array", "ES2019.Object", "DOM"],
+    "importsNotUsedAsValues": "preserve",
+    // this is important for proper files watching
+    "lib": [
+      "ES2015",
+      "ES2016",
+      "ES2017",
+      "ES2018",
+      "ES2019.Array",
+      "ES2019.Object",
+      "DOM"
+    ],
     "moduleResolution": "node",
     "noImplicitAny": true,
     "noImplicitReturns": true,
@@ -24,8 +33,12 @@
     "strictBindCallApply": true,
     "strictNullChecks": true,
     "suppressImplicitAnyIndexErrors": true,
-    "target": "es5"
+    "target": "es6"
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "examples"]
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "examples"
+  ]
 }
