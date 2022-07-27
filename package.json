@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node --logError src/index.ts",
+    "clear": "rm data/*",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
