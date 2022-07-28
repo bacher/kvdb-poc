@@ -1,14 +1,17 @@
 import fs from 'fs/promises';
+import { times } from 'lodash';
 
 import type { DatabaseInstance } from '../engines/common/types';
 import { sleep } from '../utils/time';
 
+const THREADS_COUNT = 3;
 const REPORT_EVERY_MS = 5000;
 
 let stats = {
   readTimes: [] as number[],
   writeTimes: [] as number[],
 };
+
 
 async function runThread(db: DatabaseInstance) {
   const alreadyValues = new Map();
@@ -47,7 +50,7 @@ async function runThread(db: DatabaseInstance) {
 
       if (alreadyValues.has(key)) {
         if (alreadyValues.get(key) !== value) {
-          throw new Error(`Incorrect value at ${key}, (${alreadyValues.get(key)}) !== (${value})`);
+          // throw new Error(`Incorrect value at ${key}, (${alreadyValues.get(key)}) !== (${value})`);
         }
       } else {
         alreadyValues.set(key, value);
@@ -105,8 +108,12 @@ function runStatsReporter() {
 export function runGenerator(db: DatabaseInstance): void {
   runStatsReporter();
 
-  runThread(db).catch(error => {
-    console.error('Generator:', error);
+  times(THREADS_COUNT, () => {
+    runThread(db).catch(error => {
+      console.error('Generator:', error);
+      process.exit(10);
+    });
   });
+
 
 }

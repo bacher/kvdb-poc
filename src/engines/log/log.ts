@@ -4,11 +4,15 @@ import { last } from 'lodash';
 
 import { sleep } from '../../utils/time';
 import type { DatabaseInstance, DatabaseOptions } from '../common/types';
+import { initRWLock } from '../common/rwLock';
+
+declare const Buffer: any;
+declare type Buffer = any
 
 type Tuple = {
   key: string,
   value: string | undefined
-  buffer?: any;
+  buffer?: Buffer;
 }
 
 type Chunk = {
@@ -19,7 +23,6 @@ type Chunk = {
 
 const CHUNK_SIZE = 4096;
 
-declare const Buffer: any;
 
 export async function runEngine({ dataPath }: DatabaseOptions): Promise<DatabaseInstance> {
   console.log('Run Log Engine');
@@ -36,9 +39,23 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
     isRemoved: false,
   })));
 
+  const getAccess = initRWLock();
+
+  async function readFile(filePath: string): Promise<Buffer> {
+    return getAccess(filePath).getReadAccess(() => fs.readFile(filePath));
+  }
+
+  async function appendFile(filePath: string, buffer: Buffer): Promise<void> {
+    await getAccess(filePath).getWriteAccess(() => fs.appendFile(filePath, buffer));
+  }
+
+  async function unlinkFile(filePath: string): Promise<void> {
+    await getAccess(filePath).getWriteAccess(() => fs.unlink(filePath));
+  }
+
   async function get(key: string): Promise<string | undefined> {
     for (const file of (files.filter(file => !file.isRemoved).reverse())) {
-      const chunkContent = await fs.readFile(file.filePath);
+      const chunkContent = await readFile(file.filePath);
 
       const tuples = parseFile(chunkContent);
 
@@ -79,7 +96,7 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
       newChunkAfterLastCompaction = true;
     }
 
-    await fs.appendFile(currentFile.filePath, tuple);
+    await appendFile(currentFile.filePath, tuple);
     currentFile.size += tuple.length;
   }
 
@@ -90,13 +107,13 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
     const headlessFiles = files.slice(0, -1).filter(file => !file.isRemoved);
     const reversedFiles = [...headlessFiles].reverse();
 
-    const alreadyKeys = new Set();
-    const removeChunks = [];
+    const alreadyKeys = new Set<string>();
+    const removeChunks = new Set<string>();
 
     for (const file of reversedFiles) {
       const targetFileName = file.filePath;
 
-      const chunkContent = await fs.readFile(targetFileName);
+      const chunkContent = await readFile(targetFileName);
       const tuples = parseFile(chunkContent, { includeTupleBuffers: true }).reverse();
 
       const filteredTuples = tuples.filter(tuple => {
@@ -110,7 +127,7 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
       });
 
       if (filteredTuples.length === 0) {
-        removeChunks.push(targetFileName);
+        removeChunks.add(targetFileName);
         file.size = 0;
         file.isRemoved = true;
       } else if (filteredTuples.length !== tuples.length) {
@@ -121,7 +138,7 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
         await fs.writeFile(newFilePath, updatedChunkContent);
         file.filePath = newFilePath;
         file.size = updatedChunkContent.length;
-        removeChunks.push(targetFileName);
+        removeChunks.add(targetFileName);
 
         console.log(`Compact: compact ${targetFileName} (${tuples.length}) => ${newFilePath} (${filteredTuples.length})`);
       }
@@ -134,8 +151,8 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
       const chunkB = headlessFiles[i + 1];
 
       if (chunkA.size + chunkB.size <= CHUNK_SIZE) {
-        const chunkContentA = await fs.readFile(chunkA.filePath);
-        const chunkContentB = await fs.readFile(chunkB.filePath);
+        const chunkContentA = await readFile(chunkA.filePath);
+        const chunkContentB = await readFile(chunkB.filePath);
 
         const newChunkName = getNewVersionFileName(chunkB.filePath);
 
@@ -143,8 +160,8 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
 
         console.log(`Compact: merge   ${chunkA.filePath} (${chunkA.size}b) + ${chunkB.filePath} (${chunkB.size}b) => (${chunkA.size + chunkB.size}b)`);
 
-        removeChunks.push(chunkA.filePath);
-        removeChunks.push(chunkB.filePath);
+        removeChunks.add(chunkA.filePath);
+        removeChunks.add(chunkB.filePath);
 
         chunkB.filePath = newChunkName;
         chunkB.size = chunkA.size + chunkB.size;
@@ -153,13 +170,13 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
       }
     }
 
-    if (removeChunks.length) {
+    if (removeChunks.size) {
       await sleep(1000);
 
       for (const removeFilePath of removeChunks) {
         try {
           console.log(`Compact: remove  ${removeFilePath}`);
-          await fs.unlink(removeFilePath);
+          await unlinkFile(removeFilePath);
         } catch (error) {
           console.error(error);
         }
@@ -189,7 +206,7 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
 }
 
 
-function parseFile(fileContent: any, { includeTupleBuffers = false } = {}): Tuple[] {
+function parseFile(fileContent: Buffer, { includeTupleBuffers = false } = {}): Tuple[] {
   const tuples = [];
   let offset = 0;
 
@@ -221,7 +238,7 @@ function parseFile(fileContent: any, { includeTupleBuffers = false } = {}): Tupl
   return tuples;
 }
 
-function makeChunkContent(tuples: Tuple[]): any {
+function makeChunkContent(tuples: Tuple[]): Buffer {
   return Buffer.concat(tuples.map(tuple => tuple.buffer));
 }
 
