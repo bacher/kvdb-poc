@@ -1,0 +1,44 @@
+Run Log Engine
+Run Compaction
+Compact: compact data/data1659074101062.txt (157) => data/data1659074101062.1.txt (116)
+Compact: compact data/data1659074098632.txt (155) => data/data1659074098632.1.txt (122)
+Compact: compact data/data1659074096234.txt (155) => data/data1659074096234.1.txt (107)
+Compact: compact data/data1659074094221.2.txt (107) => data/data1659074094221.3.txt (96)
+Compact: compact data/data1659074092254.2.txt (116) => data/data1659074092254.3.txt (65)
+Compact: compact data/data1659074090224.2.txt (99) => data/data1659074090224.3.txt (68)
+Compact: compact data/data1659074087905.3.txt (153) => data/data1659074087905.4.txt (90)
+Compact: compact data/data1659074083261.5.txt (118) => data/data1659074083261.6.txt (86)
+Compact: compact data/data1659074078990.6.txt (121) => data/data1659074078990.7.txt (86)
+Compact: compact data/data1659074072250.8.txt (90) => data/data1659074072250.9.txt (62)
+Compact: compact data/data1659074063778.11.txt (72) => data/data1659074063778.12.txt (55)
+Compact: compact data/data1659074047878.16.txt (106) => data/data1659074047878.17.txt (92)
+Compact: merge   data/data1659074047878.17.txt (2409b) + data/data1659074063778.12.txt (1438b) => data/data1659074063778.13.txt (3847b)
+Compact: merge   data/data1659074072250.9.txt (1641b) + data/data1659074078990.7.txt (2274b) => data/data1659074078990.8.txt (3915b)
+Compact: merge   data/data1659074090224.3.txt (1787b) + data/data1659074092254.3.txt (1730b) => data/data1659074092254.4.txt (3517b)
+Compact: remove  data/data1659074101062.txt
+Compact: remove  data/data1659074098632.txt
+Compact: remove  data/data1659074098632.1.txt
+Compact: remove  data/data1659074096234.txt
+Compact: remove  data/data1659074096234.1.txt
+Compact: remove  data/data1659074094221.2.txt
+Compact: remove  data/data1659074094221.1.txt
+Compact: remove  data/data1659074092254.2.txt
+Compact: remove  data/data1659074090224.2.txt
+Compact: remove  data/data1659074087905.3.txt
+Compact: remove  data/data1659074083261.5.txt
+Compact: remove  data/data1659074078990.6.txt
+Compact: remove  data/data1659074072250.8.txt
+Compact: remove  data/data1659074063778.11.txt
+Compact: remove  data/data1659074047878.16.txt
+Compact: remove  data/data1659074047878.17.txt
+Compact: remove  data/data1659074063778.12.txt
+Compact: remove  data/data1659074072250.9.txt
+Compact: remove  data/data1659074078990.7.txt
+Compact: remove  data/data1659074090224.3.txt
+Compact: remove  data/data1659074092254.3.txt
+[Error: ENOENT: no such file or directory, open 'data/data1659074098632.1.txt'] {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'data/data1659074098632.1.txt'
+}

@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { last } from 'lodash';
+import { groupBy, last, partition } from 'lodash';
 
 import { sleep } from '../../utils/time';
 import type { DatabaseInstance, DatabaseOptions } from '../common/types';
@@ -9,6 +9,12 @@ import { initRWLock } from '../common/rwLock';
 declare const Buffer: any;
 declare type Buffer = any
 
+enum FileType {
+  LOG = 1,
+  COMPACT = 2,
+  TEMP = 3,
+}
+
 type Tuple = {
   key: string,
   value: string | undefined
@@ -16,46 +22,176 @@ type Tuple = {
 }
 
 type Chunk = {
-  filePath: string,
+  fileInfo: FileInfo,
   size: number,
   isRemoved: boolean
 }
 
-const CHUNK_SIZE = 4096;
-
+const HEADER_SIZE = 4;
+const MAX_CHUNK_CONTENT_SIZE = 4096;
+const MAX_TUPLE_SIZE = MAX_CHUNK_CONTENT_SIZE - HEADER_SIZE;
 
 export async function runEngine({ dataPath }: DatabaseOptions): Promise<DatabaseInstance> {
   console.log('Run Log Engine');
 
-  const filePathsList = (await fs.readdir(dataPath)).filter(fileName => fileName.startsWith('data'))
-    .sort()
-    .map(fileName => path.join(dataPath, fileName));
+  function createNewLogFileInfo(): FileInfo {
+    const baseName = `data${Date.now()}`;
+
+    const filePath = path.join(dataPath, `${baseName}.txt`);
+
+    return {
+      type: FileType.LOG,
+      baseName,
+      version: 0,
+      filePath,
+    };
+  }
+
+  function getFileInfo(fileName: string): FileInfo | undefined {
+    const filePath = path.join(dataPath, fileName);
+
+    const match = fileName.match(/^(data\d+)(?:\.(\d+))?\.txt(_?)$/);
+
+    if (!match) {
+      return undefined;
+    }
+
+    const baseName = match[1];
+
+    if (match[3]) {
+      return {
+        type: FileType.TEMP,
+        baseName,
+        version: 0,
+        filePath,
+      };
+    }
+
+    if (match[2]) {
+      return {
+        type: FileType.COMPACT,
+        baseName,
+        version: Number.parseInt(match[2], 10),
+        filePath,
+      };
+    }
+
+    return {
+      type: FileType.LOG,
+      baseName,
+      version: 0,
+      filePath,
+    };
+  }
+
+  function getNewVersionFileInfo(fileInfo: FileInfo): FileInfo {
+    const { baseName } = fileInfo;
+    const version = fileInfo.version + 1;
+
+    return {
+      type: FileType.COMPACT,
+      baseName,
+      version,
+      filePath: path.join(dataPath, `${baseName}.${version}.txt`),
+    };
+  }
+
+  const filesInfoInDataDir = (await fs.readdir(dataPath))
+    .map(fileName => getFileInfo(fileName)!)
+    .filter(Boolean);
+
+  let [tempFilesInfo, filesInfoList] = partition(filesInfoInDataDir, info => info.type === FileType.TEMP);
+
+  for (const tempFileInfo of tempFilesInfo) {
+    console.log(`Init: remove old temp file ${tempFileInfo.filePath}`);
+    await fs.unlink(tempFileInfo.filePath);
+  }
+
+  filesInfoList
+    .sort((a, b) => {
+      if (a.baseName === b.baseName) {
+        return a.version - b.version;
+      }
+      return a.baseName.localeCompare(b.baseName);
+    });
+
+  const groupedByBaseName = groupBy(filesInfoList, info => info.baseName);
+
+  for (const filesInfo of Object.values(groupedByBaseName)) {
+    if (filesInfo.length > 1) {
+      filesInfo.sort((a, b) => a.version - b.version);
+      filesInfo.pop();
+
+      await Promise.all(filesInfo.map(async removeFileInfo => {
+        console.log(`Init: remove previous version ${removeFileInfo.filePath}`);
+
+        filesInfoList = filesInfoList.filter(fileInfo => fileInfo !== removeFileInfo);
+
+        await fs.unlink(removeFileInfo.filePath);
+      }));
+    }
+  }
+
+  console.log(`Files:\n  ${filesInfoList.map(info => info.filePath).join('\n  ')}`);
 
   let newChunkAfterLastCompaction = false;
 
-  const files: Chunk[] = await Promise.all(filePathsList.map(async filePath => ({
-    filePath,
-    size: (await fs.stat(filePath)).size,
-    isRemoved: false,
-  })));
+  const files: Chunk[] = await Promise.all(filesInfoList.map(async fileInfo => {
+    const fileSize = (await fs.stat(fileInfo.filePath)).size;
+
+    return {
+      fileInfo,
+      size: fileSize - (fileInfo.type === FileType.COMPACT ? HEADER_SIZE : 0),
+      isRemoved: false,
+    };
+  }));
 
   const getAccess = initRWLock();
 
-  async function readFile(filePath: string): Promise<Buffer> {
-    return getAccess(filePath).getReadAccess(() => fs.readFile(filePath));
+  async function readFile(fileInfo: FileInfo): Promise<Buffer> {
+    const fileBuffer = await getAccess(fileInfo.filePath).getReadAccess(() => fs.readFile(fileInfo.filePath));
+
+    if (fileInfo.type === FileType.TEMP) {
+      throw new Error();
+    }
+
+    if (fileInfo.type === FileType.COMPACT) {
+      const type = fileBuffer.readUInt16BE(0);
+      const size = fileBuffer.readUInt16BE(2);
+
+      if (type !== FileType.COMPACT) {
+        throw new Error('Invalid file');
+      }
+
+      if (size !== fileBuffer.length) {
+        throw new Error('Invalid file');
+      }
+
+      return fileBuffer.slice(HEADER_SIZE);
+    }
+
+    return fileBuffer;
   }
 
-  async function appendFile(filePath: string, buffer: Buffer): Promise<void> {
-    await getAccess(filePath).getWriteAccess(() => fs.appendFile(filePath, buffer));
+  async function writeFile(fileInfo: FileInfo, content: Buffer): Promise<void> {
+    const tempFilePath = `${fileInfo.filePath}_`;
+    await fs.writeFile(tempFilePath, addArchiveHeaders(content));
+    await fs.rename(tempFilePath, fileInfo.filePath);
   }
 
-  async function unlinkFile(filePath: string): Promise<void> {
-    await getAccess(filePath).getWriteAccess(() => fs.unlink(filePath));
+  async function appendFile(fileInfo: FileInfo, buffer: Buffer): Promise<void> {
+    await getAccess(fileInfo.filePath).getWriteAccess(() =>
+      fs.appendFile(fileInfo.filePath, buffer),
+    );
+  }
+
+  async function unlinkFile(fileInfo: FileInfo): Promise<void> {
+    await getAccess(fileInfo.filePath).getWriteAccess(() => fs.unlink(fileInfo.filePath));
   }
 
   async function get(key: string): Promise<string | undefined> {
     for (const file of (files.filter(file => !file.isRemoved).reverse())) {
-      const chunkContent = await readFile(file.filePath);
+      const chunkContent = await readFile(file.fileInfo);
 
       const tuples = parseFile(chunkContent);
 
@@ -79,15 +215,15 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
 
     const tuple = Buffer.concat([headerBuffer, keyBuffer, valueBuffer, Buffer.from('\n', 'utf-8')]);
 
-    if (tuple.length > CHUNK_SIZE) {
+    if (tuple.length > MAX_TUPLE_SIZE) {
       throw new Error('To big tuple');
     }
 
     let currentFile = last(files);
 
-    if (!currentFile || currentFile.size + tuple.length > CHUNK_SIZE) {
+    if (!currentFile || currentFile.size + tuple.length > MAX_CHUNK_CONTENT_SIZE) {
       currentFile = {
-        filePath: path.join(dataPath, `data${Date.now()}.txt`),
+        fileInfo: createNewLogFileInfo(),
         size: 0,
         isRemoved: false,
       };
@@ -96,7 +232,7 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
       newChunkAfterLastCompaction = true;
     }
 
-    await appendFile(currentFile.filePath, tuple);
+    await appendFile(currentFile.fileInfo, tuple);
     currentFile.size += tuple.length;
   }
 
@@ -108,12 +244,12 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
     const reversedFiles = [...headlessFiles].reverse();
 
     const alreadyKeys = new Set<string>();
-    const removeChunks = new Set<string>();
+    const removeChunks = new Set<FileInfo>();
 
     for (const file of reversedFiles) {
-      const targetFileName = file.filePath;
+      const targetFileInfo = file.fileInfo;
 
-      const chunkContent = await readFile(targetFileName);
+      const chunkContent = await readFile(targetFileInfo);
       const tuples = parseFile(chunkContent, { includeTupleBuffers: true }).reverse();
 
       const filteredTuples = tuples.filter(tuple => {
@@ -127,43 +263,45 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
       });
 
       if (filteredTuples.length === 0) {
-        removeChunks.add(targetFileName);
+        console.log(`Compact: dedupl  ${targetFileInfo} (0)`);
+        removeChunks.add(targetFileInfo);
         file.size = 0;
         file.isRemoved = true;
       } else if (filteredTuples.length !== tuples.length) {
-        const newFilePath = getNewVersionFileName(targetFileName);
-
+        const newFileInfo = getNewVersionFileInfo(targetFileInfo);
         const updatedChunkContent = makeChunkContent(filteredTuples.reverse());
 
-        await fs.writeFile(newFilePath, updatedChunkContent);
-        file.filePath = newFilePath;
+        await writeFile(newFileInfo, updatedChunkContent);
+        file.fileInfo = newFileInfo;
         file.size = updatedChunkContent.length;
-        removeChunks.add(targetFileName);
+        removeChunks.add(targetFileInfo);
 
-        console.log(`Compact: compact ${targetFileName} (${tuples.length}) => ${newFilePath} (${filteredTuples.length})`);
+        console.log(`Compact: compact ${targetFileInfo.filePath} (${tuples.length}) => ${newFileInfo.filePath} (${filteredTuples.length})`);
       }
 
       await sleep(100);
     }
 
-    for (let i = 0; i < headlessFiles.length - 1; i++) {
-      const chunkA = headlessFiles[i];
-      const chunkB = headlessFiles[i + 1];
+    const actualFiles = headlessFiles.filter(file => !file.isRemoved);
 
-      if (chunkA.size + chunkB.size <= CHUNK_SIZE) {
-        const chunkContentA = await readFile(chunkA.filePath);
-        const chunkContentB = await readFile(chunkB.filePath);
+    for (let i = 0; i < actualFiles.length - 1; i++) {
+      const chunkA = actualFiles[i];
+      const chunkB = actualFiles[i + 1];
 
-        const newChunkName = getNewVersionFileName(chunkB.filePath);
+      if (chunkA.size + chunkB.size <= MAX_CHUNK_CONTENT_SIZE) {
+        const chunkContentA = await readFile(chunkA.fileInfo);
+        const chunkContentB = await readFile(chunkB.fileInfo);
 
-        await fs.writeFile(newChunkName, Buffer.concat([chunkContentA, chunkContentB]));
+        const newChunkFileInfo = getNewVersionFileInfo(chunkB.fileInfo);
 
-        console.log(`Compact: merge   ${chunkA.filePath} (${chunkA.size}b) + ${chunkB.filePath} (${chunkB.size}b) => (${chunkA.size + chunkB.size}b)`);
+        await writeFile(newChunkFileInfo, Buffer.concat([chunkContentA, chunkContentB]));
 
-        removeChunks.add(chunkA.filePath);
-        removeChunks.add(chunkB.filePath);
+        console.log(`Compact: merge   ${chunkA.fileInfo.filePath} (${chunkA.size}b) + ${chunkB.fileInfo.filePath} (${chunkB.size}b) => ${newChunkFileInfo.filePath} (${chunkA.size + chunkB.size}b)`);
 
-        chunkB.filePath = newChunkName;
+        removeChunks.add(chunkA.fileInfo);
+        removeChunks.add(chunkB.fileInfo);
+
+        chunkB.fileInfo = newChunkFileInfo;
         chunkB.size = chunkA.size + chunkB.size;
         chunkA.size = 0;
         chunkA.isRemoved = true;
@@ -173,10 +311,10 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
     if (removeChunks.size) {
       await sleep(1000);
 
-      for (const removeFilePath of removeChunks) {
+      for (const removeFileInfo of removeChunks) {
         try {
-          console.log(`Compact: remove  ${removeFilePath}`);
-          await unlinkFile(removeFilePath);
+          console.log(`Compact: remove  ${removeFileInfo.filePath}`);
+          await unlinkFile(removeFileInfo);
         } catch (error) {
           console.error(error);
         }
@@ -238,19 +376,24 @@ function parseFile(fileContent: Buffer, { includeTupleBuffers = false } = {}): T
   return tuples;
 }
 
+function addArchiveHeaders(tuplesBuffer: Buffer): Buffer {
+  const header = Buffer.alloc(HEADER_SIZE);
+
+  header.writeUInt16BE(FileType.COMPACT, 0);
+  header.writeUInt16BE(HEADER_SIZE + tuplesBuffer.length, 2);
+
+  return Buffer.concat([header, tuplesBuffer]);
+}
+
 function makeChunkContent(tuples: Tuple[]): Buffer {
-  return Buffer.concat(tuples.map(tuple => tuple.buffer));
+  return (Buffer.concat(tuples.map(tuple => tuple.buffer)));
 }
 
-function getNewVersionFileName(filePath: string): string {
-  const dir = path.dirname(filePath);
-  const fileName = path.basename(filePath);
-
-  const match = fileName.match(/^(data\d+)(?:\.(\d+))?\.txt$/);
-
-  if (!match) {
-    throw new Error();
-  }
-
-  return path.join(dir, `${match[1]}.${Number.parseInt(match[2] ?? '0', 10) + 1}.txt`);
+type FileInfo = {
+  type: FileType,
+  baseName: string,
+  version: number
+  filePath: string,
 }
+
+
