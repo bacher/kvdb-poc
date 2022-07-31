@@ -1,5 +1,5 @@
 {
-  "name": "kvpd-poc",
+  "name": "kvdb-poc",
   "version": "0.1.0",
   "description": "Key-Value Persistence Database",
   "main": "dist/index.js",

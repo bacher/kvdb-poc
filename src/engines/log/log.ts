@@ -3,6 +3,14 @@ import path from 'path';
 import { groupBy, last, partition } from 'lodash';
 
 import { sleep } from '../../utils/time';
+import {
+  addValueToBloomFilter,
+  BLOOM_BYTES_SIZE,
+  checkIfValuePossibleInBloomFilter,
+  createBloomFilter,
+  getOffsetsForValue,
+  mergeBloomFilters,
+} from '../../utils/bloomFilter';
 import type { DatabaseInstance, DatabaseOptions } from '../common/types';
 import { initRWLock } from '../common/rwLock';
 
@@ -25,6 +33,11 @@ type Chunk = {
   fileInfo: FileInfo,
   size: number,
   isRemoved: boolean
+}
+
+type FileData = {
+  bloomFilter: Buffer | undefined
+  contentBuffer: Buffer,
 }
 
 const HEADER_SIZE = 4;
@@ -148,7 +161,7 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
 
   const getAccess = initRWLock();
 
-  async function readFile(fileInfo: FileInfo): Promise<Buffer> {
+  async function readFile(fileInfo: FileInfo): Promise<FileData> {
     const fileBuffer = await getAccess(fileInfo.filePath).getReadAccess(() => fs.readFile(fileInfo.filePath));
 
     if (fileInfo.type === FileType.TEMP) {
@@ -167,10 +180,19 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
         throw new Error('Invalid file');
       }
 
-      return fileBuffer.slice(HEADER_SIZE);
+      const bloomFilter = fileBuffer.slice(HEADER_SIZE, HEADER_SIZE + BLOOM_BYTES_SIZE);
+      const contentBuffer = fileBuffer.slice(HEADER_SIZE + BLOOM_BYTES_SIZE);
+
+      return {
+        bloomFilter,
+        contentBuffer,
+      };
     }
 
-    return fileBuffer;
+    return {
+      bloomFilter: undefined,
+      contentBuffer: fileBuffer,
+    };
   }
 
   async function writeFile(fileInfo: FileInfo, content: Buffer): Promise<void> {
@@ -190,10 +212,16 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
   }
 
   async function get(key: string): Promise<string | undefined> {
-    for (const file of (files.filter(file => !file.isRemoved).reverse())) {
-      const chunkContent = await readFile(file.fileInfo);
+    const keyBloomOffsets = getOffsetsForValue(key);
 
-      const tuples = parseFile(chunkContent);
+    for (const file of (files.filter(file => !file.isRemoved).reverse())) {
+      const { bloomFilter, contentBuffer } = await readFile(file.fileInfo);
+
+      if (bloomFilter && !checkIfValuePossibleInBloomFilter(bloomFilter, keyBloomOffsets)) {
+        continue;
+      }
+
+      const tuples = parseFile(contentBuffer);
 
       for (const tuple of [...tuples].reverse()) {
         if (tuple.key === key) {
@@ -250,7 +278,7 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
       const targetFileInfo = file.fileInfo;
 
       const chunkContent = await readFile(targetFileInfo);
-      const tuples = parseFile(chunkContent, { includeTupleBuffers: true }).reverse();
+      const tuples = parseFile(chunkContent.contentBuffer, { includeTupleBuffers: true }).reverse();
 
       const filteredTuples = tuples.filter(tuple => {
         const alreadyHas = alreadyKeys.has(tuple.key);
@@ -263,7 +291,7 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
       });
 
       if (filteredTuples.length === 0) {
-        console.log(`Compact: dedupl  ${targetFileInfo} (0)`);
+        console.log(`Compact: dedupl  ${targetFileInfo.filePath} (0)`);
         removeChunks.add(targetFileInfo);
         file.size = 0;
         file.isRemoved = true;
@@ -294,7 +322,12 @@ export async function runEngine({ dataPath }: DatabaseOptions): Promise<Database
 
         const newChunkFileInfo = getNewVersionFileInfo(chunkB.fileInfo);
 
-        await writeFile(newChunkFileInfo, Buffer.concat([chunkContentA, chunkContentB]));
+        const bloomFilterA = chunkContentA.bloomFilter ?? getBloomFilterByContentBuffer(chunkContentA.contentBuffer);
+        const bloomFilterB = chunkContentB.bloomFilter ?? getBloomFilterByContentBuffer(chunkContentB.contentBuffer);
+
+        const bloomFilter = mergeBloomFilters(bloomFilterA, bloomFilterB);
+
+        await writeFile(newChunkFileInfo, Buffer.concat([bloomFilter, chunkContentA.contentBuffer, chunkContentB.contentBuffer]));
 
         console.log(`Compact: merge   ${chunkA.fileInfo.filePath} (${chunkA.size}b) + ${chunkB.fileInfo.filePath} (${chunkB.size}b) => ${newChunkFileInfo.filePath} (${chunkA.size + chunkB.size}b)`);
 
@@ -386,7 +419,14 @@ function addArchiveHeaders(tuplesBuffer: Buffer): Buffer {
 }
 
 function makeChunkContent(tuples: Tuple[]): Buffer {
-  return (Buffer.concat(tuples.map(tuple => tuple.buffer)));
+  const bloomFilter = createBloomFilter();
+
+  const tuplesBuffers = tuples.map(tuple => {
+    addValueToBloomFilter(bloomFilter, tuple.key);
+    return tuple.buffer;
+  });
+
+  return Buffer.concat([bloomFilter, ...tuplesBuffers]);
 }
 
 type FileInfo = {
@@ -396,4 +436,14 @@ type FileInfo = {
   filePath: string,
 }
 
+function getBloomFilterByContentBuffer(content: Buffer): Buffer {
+  const bloomFilter = createBloomFilter();
 
+  const tuples = parseFile(content);
+
+  for (const tuple of tuples) {
+    addValueToBloomFilter(bloomFilter, tuple.key);
+  }
+
+  return bloomFilter;
+}
